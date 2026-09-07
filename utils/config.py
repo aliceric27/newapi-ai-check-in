@@ -1108,9 +1108,11 @@ class AppConfig:
                 has_valid_github = github_accounts is not None and len(github_accounts) > 0
                 has_valid_site = site_accounts is not None and len(site_accounts) > 0
 
-                if not has_valid_linux_do and not has_valid_github and not has_valid_site and not valid_system_access_token and not valid_cookies:
+                valid_access_token = bool(account.get("access_token"))
+
+                if not has_valid_linux_do and not has_valid_github and not has_valid_site and not valid_system_access_token and not valid_cookies and not valid_access_token:
                     print(
-                        f"⚠️ {account_name} must have at least one valid authentication method (site, linux.do, github, system_access_token, or cookies), skipping"
+                        f"⚠️ {account_name} must have at least one valid authentication method (site, linux.do, github, system_access_token, cookies, or access_token), skipping"
                     )
                     continue
 

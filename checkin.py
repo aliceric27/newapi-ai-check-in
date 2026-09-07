@@ -1034,6 +1034,83 @@ class CheckIn:
         finally:
             session.close()
 
+    async def check_in_with_x666_token(
+        self,
+        access_token: str,
+        common_headers: dict,
+    ) -> tuple[bool, dict]:
+        """使用 up.x666.me access_token 直接执行每日抽奖签到"""
+        print(f"ℹ️ {self.account_name}: Executing direct x666 check-in with access_token")
+        session = curl_requests.Session(proxy=self.http_proxy_config, timeout=30)
+        try:
+            headers = common_headers.copy()
+            headers.update({
+                "authorization": f"Bearer {access_token}",
+                "referer": "https://up.x666.me/",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
+            })
+            session.cookies.set("i18next", "en")
+
+            status_resp = session.get("https://up.x666.me/api/checkin/status", headers=headers, timeout=30)
+            if status_resp.status_code != 200:
+                return False, {"error": f"Failed to get checkin status: HTTP {status_resp.status_code}"}
+
+            status_data = response_resolve(status_resp, "get_checkin_status", self.account_name)
+            if not status_data or not status_data.get("success"):
+                err = status_data.get("message", "Unknown error") if status_data else "Invalid response"
+                return False, {"error": err}
+
+            can_spin = status_data.get("can_spin", False)
+            if can_spin:
+                spin_headers = headers.copy()
+                spin_headers.update({
+                    "content-length": "0",
+                    "content-type": "application/json",
+                    "origin": "https://up.x666.me",
+                })
+                spin_resp = session.post("https://up.x666.me/api/checkin/spin", headers=spin_headers, timeout=30)
+                spin_data = response_resolve(spin_resp, "execute_spin", self.account_name)
+                if spin_data and spin_data.get("success"):
+                    msg = spin_data.get("message", "")
+                    print(f"✅ {self.account_name}: Spin successful! {msg}")
+                else:
+                    msg = spin_data.get("message", "Spin failed") if spin_data else "Spin failed"
+                    print(f"⚠️ {self.account_name}: Spin returned: {msg}")
+
+                status_resp = session.get("https://up.x666.me/api/checkin/status", headers=headers, timeout=30)
+                if status_resp.status_code == 200:
+                    new_status = response_resolve(status_resp, "get_checkin_status", self.account_name)
+                    if new_status and new_status.get("success"):
+                        status_data = new_status
+            else:
+                today_record = status_data.get("today_record") or {}
+                today_quota = today_record.get("quota_amount", 0) if isinstance(today_record, dict) else 0
+                today_quota_display = round(today_quota / 500, 2)
+                print(f"✅ {self.account_name}: Already spun today, today's prize: {today_quota_display}")
+
+            current_quota = status_data.get("current_quota", 0)
+            total_quota = status_data.get("total_quota", 0)
+            username = status_data.get("username", "")
+            streak_days = status_data.get("streak_days", 0)
+            display_quota = round(current_quota / 500000, 2)
+            display_str = f"账号: {username} | 余额: ${display_quota} (quota: {current_quota}) | 连续签到: {streak_days}天"
+            print(f"💰 {self.account_name}: {display_str}")
+
+            return True, {
+                "success": True,
+                "display": display_str,
+                "quota": current_quota,
+                "used_quota": 0,
+                "bonus_quota": total_quota,
+            }
+        except Exception as e:
+            print(f"❌ {self.account_name}: Error during direct x666 checkin: {e}")
+            return False, {"error": str(e)}
+        finally:
+            session.close()
+
     async def check_in_with_system_access_token(
         self,
         access_token: str,
@@ -1925,6 +2002,19 @@ class CheckIn:
         linuxdo_accounts = self.account_config.linux_do  # 现在是 List[OAuthAccountConfig] 类型
         site_accounts = self.account_config.site
         results = []
+
+        # 如果是 x666 且配置了 access_token，优先执行直接签到（避免 Linux.do 429 限制）
+        x666_access_token = self.account_config.get("access_token")
+        if self.provider_config.name == "x666" and x666_access_token:
+            print(f"\nℹ️ {self.account_name}: Trying direct x666 access_token check-in")
+            try:
+                success, user_info = await self.check_in_with_x666_token(x666_access_token, common_headers)
+                results.append(("x666_token", success, user_info))
+                if success:
+                    return results
+            except Exception as e:
+                print(f"❌ {self.account_name}: Direct x666 check-in error: {e}")
+                results.append(("x666_token", False, {"error": str(e)}))
 
         # 尝试 cookies 认证
         if cookies_data:
