@@ -146,7 +146,7 @@ class LinuxDoSignIn:
 
                     # 如果未登录，则执行登录流程
                     if not is_logged_in:
-                        run_login_manual = os.getenv('RUN_LINUXDO_LOGIN_MANUAL')
+                        run_login_manual = os.getenv('RUN_LINUXDO_LOGIN_MANUAL', 'true')
                         print(f"ℹ️ {self.account_name}: Run log-in manual env is {run_login_manual}")
                         if run_login_manual != 'true':
                             print(
